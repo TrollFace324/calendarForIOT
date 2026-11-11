@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Моё расписание</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header><div class="wrap"><p class="eyebrow">Планировщик ИРИТ</p><h1>Соберите своё расписание</h1><p class="intro">Добавьте варианты групп, расставьте приоритеты и сравните подходящие сочетания.</p></div></header>
+  <main class="wrap">
+    <section class="panel"><div class="section-head"><div><h2>Приоритеты</h2><p>Критерии сравниваются сверху вниз.</p></div></div><div id="priorities" class="priorities"></div></section>
+    <section class="panel"><div class="section-head"><div><h2>Дисциплины и группы</h2><p>Каждая встреча на отдельной строке. Примеры: <code>Пн 09:00-10:30</code>, <code>Ср 10:40-12:10 ч</code>, <code>Ср 10:40-12:10 з</code>. Без буквы занятие идёт каждую неделю.</p></div><button id="addActivity" class="secondary">+ Дисциплина</button></div><div id="activities"></div><div class="actions"><button id="solve">Подобрать расписание</button><label class="secondary upload">Импорт групп из HAR<input id="harImport" type="file" accept=".har,application/json" hidden></label><button id="export" class="secondary">Скачать данные</button><label class="secondary upload">Загрузить JSON<input id="import" type="file" accept=".json,application/json" hidden></label><button id="reset" class="text-button">Пример данных</button></div><p id="harStatus"></p></section>
+    <section class="panel"><div class="section-head"><div><h2>Расписание из Modeus</h2><p>После импорта групп загрузите HAR со страницы календаря. Найденное время добавится к совпадающим группам.</p></div><label class="secondary upload">Импорт времени из HAR<input id="calendarHarImport" type="file" accept=".har,application/json" hidden></label><label class="secondary upload">Открыть JSON Modeus<input id="modeusImport" type="file" accept=".json,application/json" hidden></label></div><p id="modeusStatus"></p><div id="modeusPreview"></div></section>
+    <section class="panel" id="results"><div class="section-head"><div><h2>Варианты</h2><p id="status">Нажмите «Подобрать расписание».</p></div></div><div id="variantTabs" class="tabs"></div><div id="summary"></div><div id="calendar"></div></section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>
