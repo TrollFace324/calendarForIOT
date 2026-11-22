@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const { DAY, defaults, wallTime, fromWall, weekStart, parseCalendar, organize, mandatorySchedule, overlapBetween, solve, exportCalendar } = Planner;
+  const { DAY, defaults, criterionDefaults, wallTime, fromWall, weekStart, parseCalendar, organize, mandatorySchedule, overlapBetween, solve, exportCalendar } = Planner;
   const STORE = 'para-plan-v1';
   const colors = ['violet', 'blue', 'green', 'amber', 'pink', 'slate'];
   const byId = id => document.getElementById(id);
@@ -17,7 +17,7 @@
   const weekday = dateOptions({ weekday: 'short' });
   const interval = event => `${dateTime.format(wallTime(event.start))}–${dateTime.format(wallTime(event.end))}`;
   const modal = byId('modal');
-  let state = { sources: [], priorities: [...defaults], subjects: {}, choices: null, pins: {}, rules: { days: [], earliest: '', latest: '' }, planReady: false, week: weekStart(today()) };
+  let state = { sources: [], priorities: [...defaults], subjects: {}, choices: null, pins: {}, rules: { days: [], earliest: '', latest: '' }, preferences: { order: [...criterionDefaults], teachers: {}, groups: {}, unwantedDays: [], gaps: 'prefer', earliest: '', latest: '' }, planReady: false, week: weekStart(today()) };
   let view = 'calendar';
   let model;
   let result;
@@ -31,6 +31,12 @@
     const saved = JSON.parse(localStorage.getItem(STORE));
     if (saved?.sources && saved.priorities?.length) state = { ...state, ...saved };
   } catch { storageError = true; }
+  state.preferences = { order: [...criterionDefaults], teachers: {}, groups: {}, unwantedDays: [], gaps: 'prefer', earliest: '', latest: '', ...state.preferences };
+  const savedOrder = Array.isArray(state.preferences.order) ? state.preferences.order.filter(id => criterionDefaults.includes(id)) : [];
+  state.preferences.order = [...new Set([...(savedOrder.includes('subjects') ? [] : ['subjects']), ...savedOrder, ...criterionDefaults])];
+  if (!Array.isArray(state.preferences.unwantedDays)) state.preferences.unwantedDays = [];
+  if (!state.preferences.teachers || typeof state.preferences.teachers !== 'object') state.preferences.teachers = {};
+  if (!state.preferences.groups || typeof state.preferences.groups !== 'object') state.preferences.groups = {};
   for (const [subjectId, pin] of Object.entries(state.pins)) {
     if (!Array.isArray(pin)) continue;
     if (pin.length === 1) state.pins[subjectId] = pin[0];
@@ -58,6 +64,17 @@
   const configFor = subject => Object.hasOwn(state.subjects, subject) ? state.subjects[subject] : {};
   const priorityFor = subject => state.priorities.find(priority => priority.id === (configFor(subject).priority || 'wanted')) || state.priorities.at(-1);
   const tone = color => colors.includes(color) ? color : 'violet';
+  const criterionNames = { subjects: 'Дисциплины', teachers: 'Преподаватели', saturday: 'Свободная суббота', groups: 'Предпочтительные группы', days: 'Другие дни без пар', gaps: 'Окна', studyDays: 'Меньше учебных дней', time: 'Удобное время' };
+  const ratingOptions = value => [[0, 'Без оценки'], [2, 'Очень хочу'], [1, 'Желательно'], [-1, 'Нежелательно']]
+    .map(([rating, label]) => `<option value="${rating}" ${Number(value || 0) === rating ? 'selected' : ''}>${label}</option>`).join('');
+  function renderPreferences() {
+    const prefs = state.preferences;
+    byId('preference-controls').innerHTML = `<h3>Порядок критериев</h3><p class="panel-hint">Первый критерий важнее следующего.</p>
+      <ol class="criterion-list">${prefs.order.map((name, index) => `<li>${escape(criterionNames[name])}<span><button type="button" data-action="move-criterion" data-key="${name}" data-direction="-1" ${index ? '' : 'disabled'} aria-label="Выше">↑</button><button type="button" data-action="move-criterion" data-key="${name}" data-direction="1" ${index < prefs.order.length - 1 ? '' : 'disabled'} aria-label="Ниже">↓</button></span></li>`).join('')}</ol>
+      <label class="form-label">Окна<select data-preference="gaps"><option value="ignore" ${prefs.gaps === 'ignore' ? 'selected' : ''}>Не важно</option><option value="prefer" ${prefs.gaps === 'prefer' ? 'selected' : ''}>Лучше без окон</option><option value="forbid" ${prefs.gaps === 'forbid' ? 'selected' : ''}>Окон быть не должно</option></select></label>
+      <fieldset><legend>Другие нежелательные дни</legend><div class="rule-days">${[[1,'Пн'],[2,'Вт'],[3,'Ср'],[4,'Чт'],[5,'Пт'],[0,'Вс']].map(([day,label]) => `<label><input type="checkbox" data-preference="day" value="${day}" ${prefs.unwantedDays.includes(day) ? 'checked' : ''}>${label}</label>`).join('')}</div></fieldset>
+      <div class="rule-times"><label class="form-label">Предпочитаю не раньше<input type="time" data-preference="earliest" value="${attr(prefs.earliest)}"></label><label class="form-label">Предпочитаю не позже<input type="time" data-preference="latest" value="${attr(prefs.latest)}"></label></div>`;
+  }
   const tile = (name, color) => `<span class="tile ${color}">${icon(name)}</span>`;
   const action = (name, label, style = 'secondary', image = '') => `<button type="button" class="button ${style}" data-action="${name}">${image ? icon(image) : ''}${label}</button>`;
 
@@ -164,8 +181,11 @@
       const status = !enabled ? 'Исключена из подбора' : !state.planReady ? 'Группа определится при построении плана' : selected
         ? `В плане: ${escape(selected.group || 'фиксированные занятия')} · пар: ${selected.events.length}`
         : subject.fixed.length ? 'В плане только обязательные пары' : 'Не вошла в план';
+      const teachers = [...new Set(subject.options.flatMap(option => option.events.flatMap(event => (event.teacher || '').split(/[,;]/).map(value => value.trim()).filter(Boolean))))].sort(compareNames);
       return `<article class="panel subject-card" data-subject="${attr(name)}"><header><h2>${escape(name)}</h2><label class="switch"><input ${control} aria-label="В плане · ${attr(name)}" ${enabled ? 'checked' : ''}> В плане</label></header>
         <label>Приоритет<select data-change="priority">${state.priorities.map(priority => `<option value="${attr(priority.id)}" ${priority.id === priorityFor(name).id ? 'selected' : ''}>${escape(priority.name)}</option>`).join('')}</select></label>
+        ${teachers.length ? `<div class="preference-fields"><h3>Преподаватели</h3>${teachers.map(teacher => `<label>${escape(teacher)}<select data-change="teacher-rating" data-teacher="${attr(teacher)}">${ratingOptions(state.preferences.teachers[name]?.[teacher])}</select></label>`).join('')}</div>` : ''}
+        <div class="preference-fields"><h3>Предпочтительные группы</h3>${subject.options.map(option => `<label>${escape(option.group || 'Единственный комплект')}<select data-change="group-rating" data-option="${attr(option.id)}">${ratingOptions(state.preferences.groups[option.id])}</select></label>`).join('')}</div>
         <div class="block-row">
           ${subject.options[0].group ? `<label>Группа на весь период<select data-change="pin" data-key="${attr(subject.id)}" ${enabled ? '' : 'disabled'}><option value="">Подобрать автоматически</option>
             ${subject.options.map(option => {
@@ -283,6 +303,7 @@
     if (calendar || state.planReady) renderCalendar();
     else byId('week-grid').replaceChildren();
     renderMandatory();
+    renderPreferences();
     if (state.planReady) renderConflicts();
     else byId('conflicts').replaceChildren();
     if (!calendar) renderSubjects();
@@ -321,7 +342,12 @@
     view = 'calendar';
     byId('notice').hidden = true;
     recalculate();
-    if (!result.events.length) notify('Совместимых групп не найдено. Проверьте причины в разделе «Конфликты» или измените ограничения.');
+    if (result.infeasible) {
+      state.planReady = false;
+      view = 'subjects';
+      recalculate();
+      notify('Обязательные пары образуют окно от 90 минут. Измените режим окон, чтобы построить расписание.');
+    } else if (!result.events.length) notify('Совместимых групп не найдено. Проверьте причины в разделе «Конфликты» или измените ограничения.');
   }
 
   function showModal(title, body) {
@@ -483,6 +509,11 @@
     if (!button) return;
     const { action: command, key, option } = button.dataset;
     if (command === 'view') { view = button.dataset.view; render(); }
+    if (command === 'move-criterion') {
+      const order = state.preferences.order;
+      const index = order.indexOf(key), next = index + Number(button.dataset.direction);
+      if (index >= 0 && next >= 0 && next < order.length) { [order[index], order[next]] = [order[next], order[index]]; editPlan(); }
+    }
     if (command === 'edit-plan') editPlan();
     if (command === 'import') importDialog();
     if (command === 'close') modal.close();
@@ -514,6 +545,20 @@
       persistRules();
       mandatory = mandatorySchedule(model, { ...state, activeSubjects: selection.active });
       renderMandatory();
+    }
+    if (target.dataset.preference) {
+      const prefs = state.preferences;
+      if (target.dataset.preference === 'day') prefs.unwantedDays = [...byId('preference-controls').querySelectorAll('[data-preference=day]:checked')].map(input => Number(input.value));
+      else prefs[target.dataset.preference] = target.value;
+      editPlan();
+    }
+    if (target.dataset.change === 'teacher-rating' || target.dataset.change === 'group-rating') {
+      const subject = target.closest('[data-subject]').dataset.subject;
+      if (target.dataset.change === 'teacher-rating') {
+        state.preferences.teachers[subject] ||= {};
+        state.preferences.teachers[subject][target.dataset.teacher] = Number(target.value);
+      } else state.preferences.groups[target.dataset.option] = Number(target.value);
+      editPlan();
     }
     if (target.form?.id === 'import-form' && ['files', 'folder'].includes(target.name)) {
       if (target.files.length) target.form.elements[target.name === 'folder' ? 'files' : 'folder'].value = '';

@@ -70,9 +70,10 @@
       <aside class="sidebar">
         <section class="panel conflict-panel" id="mandatory" aria-label="Обязательные пары" hidden></section>
         <section class="panel priority-panel" id="rules-panel" aria-label="Глобальные приоритеты">
-          <div class="panel-heading"><span class="tile blue"><svg class="icon"><use href="#i-clock"/></svg></span><div><h2>Глобальные приоритеты</h2><p>Ограничения для всех групп</p></div></div>
+          <div class="panel-heading"><span class="tile blue"><svg class="icon"><use href="#i-clock"/></svg></span><div><h2>Глобальные приоритеты</h2><p>Пожелания и жёсткие ограничения</p></div></div>
+          <div id="preference-controls"></div>
           <form id="rules-form" class="rules-form">
-            <fieldset><legend>Дни без пар</legend><div class="rule-days">
+            <fieldset><legend>Запретить пары в эти дни</legend><div class="rule-days">
               <label><input type="checkbox" name="day" value="1">Пн</label><label><input type="checkbox" name="day" value="2">Вт</label>
               <label><input type="checkbox" name="day" value="3">Ср</label><label><input type="checkbox" name="day" value="4">Чт</label>
               <label><input type="checkbox" name="day" value="5">Пт</label><label><input type="checkbox" name="day" value="6">Сб</label>

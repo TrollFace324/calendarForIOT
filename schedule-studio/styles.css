@@ -38,3 +38,4 @@ dialog{color:var(--ink);width:min(540px,calc(100% - 24px));max-height:calc(100% 
 .tree-files{padding:0 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
 .tree-files>summary{padding:8px 0;color:var(--muted);font-size:13px;cursor:pointer}
 @media(max-width:550px){.tree-body{padding:7px}.tree-folder>summary{padding:9px;gap:6px}.folder-count{padding:3px 5px}}
+.criterion-list{padding-left:1.5rem}.criterion-list li{padding:.35rem 0;display:list-item}.criterion-list li span{float:right;display:flex;gap:.3rem}.criterion-list button{border:1px solid #ccd3df;background:white;border-radius:.4rem;cursor:pointer}.criterion-list button:disabled{opacity:.35}.preference-fields{margin-top:1rem}.preference-fields h3{font-size:.85rem;margin:.5rem 0}.preference-fields label{display:flex;justify-content:space-between;align-items:center;gap:.5rem;margin:.35rem 0;font-size:.85rem}.preference-fields select{max-width:11rem}

@@ -10,6 +10,7 @@
     { id: 'wanted', name: 'Желательная', color: 'green' },
     { id: 'optional', name: 'Факультатив', color: 'amber' },
   ];
+  const criterionDefaults = ['subjects', 'teachers', 'saturday', 'groups', 'days', 'gaps', 'studyDays', 'time'];
 
   function wallTime(timestamp, zone = ZONE) {
     if (!formatters.has(zone)) formatters.set(zone, new Intl.DateTimeFormat('en-GB', {
@@ -192,6 +193,48 @@
     return { events, issues };
   }
 
+  function preferenceScore(chosen, events, coverage, state) {
+    const preferences = state.preferences || {};
+    const counts = { teachers: [0, 0, 0], groups: [0, 0, 0], saturday: [0, 0], days: [0, 0], gaps: [0, 0], studyDays: [0], time: [0] };
+    const levels = { '2': 0, '1': 1, '-1': 2 };
+    for (const { block, option } of chosen) {
+      const teacherRatings = [...new Set(option.events.flatMap(event => (event.teacher || '').split(/[,;]/).map(name => name.trim()).filter(Boolean)))]
+        .map(name => Number(preferences.teachers?.[block.subject]?.[name] || 0));
+      const bestTeacher = teacherRatings.length ? Math.max(...teacherRatings) : 0;
+      const teacherLevel = levels[String(bestTeacher)];
+      if (teacherLevel !== undefined) counts.teachers[teacherLevel] += teacherLevel === 2 ? -1 : 1;
+      const groupLevel = levels[String(Number(preferences.groups?.[option.id] || 0))];
+      if (groupLevel !== undefined) counts.groups[groupLevel] += groupLevel === 2 ? -1 : 1;
+    }
+    const days = new Map();
+    for (const event of events) {
+      const start = wallTime(event.start);
+      const date = Math.floor(start / DAY) * DAY;
+      if (!days.has(date)) days.set(date, []);
+      days.get(date).push({ start, end: wallTime(event.end) });
+    }
+    const unwanted = new Set(preferences.unwantedDays || []);
+    for (const [date, lessons] of days) {
+      const weekday = new Date(date).getUTCDay();
+      lessons.sort(byStart);
+      counts.studyDays[0]--;
+      if (weekday === 6) { counts.saturday[0]--; counts.saturday[1] -= lessons.length; }
+      if (unwanted.has(weekday)) { counts.days[0]--; counts.days[1] -= lessons.length; }
+      let lastEnd = lessons[0].end;
+      for (let index = 1; index < lessons.length; index++) {
+        const minutes = (lessons[index].start - lastEnd) / 60000;
+        if (minutes >= 90) { counts.gaps[0] -= minutes; counts.gaps[1]--; if (preferences.gaps === 'forbid') return null; }
+        lastEnd = Math.max(lastEnd, lessons[index].end);
+      }
+      const earliest = preferences.earliest ? Number(preferences.earliest.slice(0, 2)) * 60 + Number(preferences.earliest.slice(3)) : null;
+      const latest = preferences.latest ? Number(preferences.latest.slice(0, 2)) * 60 + Number(preferences.latest.slice(3)) : null;
+      if (earliest !== null) counts.time[0] -= Math.max(0, earliest - (lessons[0].start - date) / 60000);
+      if (latest !== null) counts.time[0] -= Math.max(0, (lessons.at(-1).end - date) / 60000 - latest);
+    }
+    return (preferences.order || criterionDefaults).flatMap(id => id === 'subjects' ? coverage
+      : id === 'gaps' && preferences.gaps === 'ignore' ? [0, 0] : counts[id] || []);
+  }
+
   function solve(model, state, limit = 35000) {
     const mandatory = mandatorySchedule(model, state);
     const ranks = new Map(state.priorities.map((priority, index) => [priority.id, index]));
@@ -225,6 +268,8 @@
     const chosen = [];
     let best = [];
     let bestScore = [...score];
+    let bestPreference = null;
+    const subjectsFirst = (state.preferences?.order || criterionDefaults)[0] === 'subjects';
     let visited = 0;
     let limited = false;
     const cache = new Map();
@@ -235,8 +280,15 @@
     }
     function search(index) {
       if (++visited > limit || index > 500) { limited = true; return; }
-      if (compare(score, bestScore) > 0) { best = [...chosen]; bestScore = [...score]; }
-      if (index === blocks.length || compare(upper, bestScore) <= 0) return;
+      if (index === blocks.length) {
+        const candidateEvents = mandatory.events.concat(chosen.flatMap(({ option }) => option.flexible)).sort(byStart);
+        const preference = preferenceScore(chosen, candidateEvents, score, state);
+        if (preference && (!bestPreference || compare(preference, bestPreference) > 0)) {
+          best = [...chosen]; bestScore = [...score]; bestPreference = preference;
+        }
+        return;
+      }
+      if (subjectsFirst && bestPreference && compare(upper, bestScore) < 0) return;
       const block = blocks[index];
       for (const option of block.pinned ? [block.pinned] : block.options) {
         if (option.internal || option.missing.length || option.restricted || option.fixedConflict || chosen.some(entry => clash(option, entry.option))) continue;
@@ -245,7 +297,7 @@
         search(index + 1);
         score[block.rank]--;
         chosen.pop();
-        if (limited || compare(upper, bestScore) <= 0) return;
+        if (limited || (subjectsFirst && bestPreference && compare(upper, bestScore) < 0)) return;
       }
       upper[block.rank]--;
       search(index + 1);
@@ -258,7 +310,8 @@
       alternatives: block.options.map(option => ({ option, restriction: option.restricted ? violationFor(option.restricted) : '', collisions: option.flexible.flatMap(event => events
         .filter(other => overlaps(event, other)).map(other => ({ event, other }))) })),
     }));
-    return { selected, events, conflicts, limited, mandatory };
+    return { selected, events, conflicts, limited, mandatory, preference: bestPreference,
+      infeasible: bestPreference === null && !limited && state.preferences?.gaps === 'forbid' };
   }
 
   const encode = value => String(value).replace(/\\/g, '\\\\').replace(/\r?\n|\r/g, '\\n').replace(/[,;]/g, '\\$&');
@@ -285,7 +338,7 @@
     }).join('\r\n') + '\r\n';
   }
 
-  const api = { ZONE, DAY, defaults, wallTime, fromWall, weekStart, parseCalendar, organize, mandatorySchedule, overlapBetween, solve, exportCalendar };
+  const api = { ZONE, DAY, defaults, criterionDefaults, wallTime, fromWall, weekStart, parseCalendar, organize, mandatorySchedule, overlapBetween, solve, exportCalendar };
   if (typeof module !== 'undefined') module.exports = api;
   else root.Planner = api;
 })(globalThis);
