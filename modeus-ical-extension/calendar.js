@@ -6,6 +6,7 @@
   const zone = 'Asia/Yekaterinburg';
   const isoDate = stamp => new Date(stamp).toISOString().slice(0, 10);
   const cleanText = value => value.replace(/\\([nN,;\\])/g, (_, character) => /n/i.test(character) ? '\n' : character);
+  const escapeText = value => value.replace(/\\/g, '\\\\').replace(/\r\n?|\n/g, '\\n').replace(/[,;]/g, '\\$&');
   const formats = new Map();
 
   function parseDate(value) {
@@ -183,10 +184,114 @@
       zones.set(id, component.lines);
     }
     for (const [id, lines] of zones) target.zones.set(id, lines);
-    for (const event of matched) {
-      const existing = target.events.get(event.key);
-      if (!existing || event.sequence > existing.sequence || (event.sequence === existing.sequence && event.stamp >= existing.stamp)) target.events.set(event.key, event);
+    mergeEvents(target.events, matched);
+    return inPeriod;
+  }
+
+  function mergeEvents(target, events) {
+    for (const event of events) {
+      const existing = target.get(event.key);
+      if (!existing || event.sequence > existing.sequence || (event.sequence === existing.sequence && event.stamp >= existing.stamp)) target.set(event.key, event);
     }
+  }
+
+  function wallStamp(value, timeZone) {
+    if (Number.isFinite(value)) return value;
+    const parts = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::(\d{2})(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?$/i.exec(value || '');
+    if (!parts) return NaN;
+    const [, date, hour, minute, second = '00', fraction = '', offset] = parts;
+    if (!Number.isFinite(parseDate(date)) || hour > 23 || minute > 59 || second > 59) return NaN;
+    const stamp = Date.parse(date + 'T' + hour + ':' + minute + ':' + second + fraction + (offset || 'Z'));
+    return offset && Number.isFinite(stamp) ? inZone(stamp, timeZone) : stamp;
+  }
+
+  function compactDate(stamp) {
+    return new Date(stamp).toISOString().slice(0, 19).replace(/[-:]/g, '');
+  }
+
+  function eventLinks(uid, start) {
+    const encode = value => encodeURIComponent(JSON.stringify(value)).replace(/%3A/g, ':').replace(/%2C/g, ',');
+    const query = 'selectedEvent=' + encode({ eventId: uid }) +
+      '&calendar=' + encode({ view: 'agendaWeek', date: new Date(start).toISOString() });
+    const base = 'https://urfu.modeus.org/schedule-calendar/';
+    return 'Посмотреть в Моем расписании: ' + base + 'my?' + query + '\n' +
+      'Посмотреть в мобильной версии: ' + base + 'mobile?' + query + '\n';
+  }
+
+  function annotatedTeacher(teacher, notes) {
+    return [teacher, ...notes.map(name => '(ведёт ' + name + ')')].filter(Boolean).join(' ');
+  }
+
+  const normalizeName = name => name.normalize('NFC').replace(/\s+/gu, ' ').toLowerCase();
+  const teacherNames = teacher => teacher.split(/[,;]/).map(name => name.trim()).filter(Boolean);
+  const isFullName = name => /^(?:\p{Lu}[\p{L}'’-]+\s+){2}\p{Lu}[\p{L}'’-]+$/u.test(name);
+  const isSupport = name => /^support(?:\s+_\S+)?$/i.test(name);
+
+  function htmlEvent(record, start, timeZone, collectedAt) {
+    const uid = String(record.uid || '').trim();
+    const end = wallStamp(record.end, timeZone);
+    if (!uid || /[\r\n]/.test(uid)) throw new Error('В HTML календаря есть занятие без UID.');
+    if (!Number.isFinite(end) || end <= start) throw new Error('В HTML календаря неверное время окончания занятия.');
+
+    const notes = new Set();
+    function removeNote(value) {
+      return String(value || '').trim().replace(
+        /[\s,;:—–]*\(\s*вед[её]т\s+([^()]+?)\s*\)|(?:^|[\s,;:—–-]+)вед[её]т\s+([^()]+?)\s*$/giu,
+        (_, parenthesized, plain) => {
+          notes.add((parenthesized || plain).trim().replace(/\s+/gu, ' '));
+          return '';
+        },
+      ).trim();
+    }
+    const subject = String(record.subject || '').trim();
+    const title = removeNote(record.title);
+    const group = removeNote(record.group);
+    const teacher = removeNote(record.teacher);
+    removeNote(record.note);
+    if (!subject || !title) throw new Error('В HTML календаря есть занятие без названия.');
+    const type = String(record.type || title.replace(/\s+\d+$/, '')).trim();
+    const category = String(record.category || type.split(' / ')[0]).trim();
+    const course = String(record.course || subject).trim();
+    const noteNames = [...notes];
+    const instructor = annotatedTeacher(teacher, noteNames);
+    const description = [type, instructor && 'Преподаватель: ' + instructor, eventLinks(uid, start)].filter(Boolean).join('\n\n');
+    const summary = subject + ' / ' + title + (group ? ' / ' + group : '');
+    const sequence = Math.max(0, Number.parseInt(record.sequence, 10) || 0);
+    const observedStamp = wallStamp(record.stamp, timeZone);
+    const stamp = compactDate(Number.isFinite(observedStamp) ? observedStamp : inZone(collectedAt, timeZone));
+    const lines = [
+      'BEGIN:VEVENT',
+      'UID:' + escapeText(uid),
+      'SEQUENCE:' + sequence,
+      'ORGANIZER;CN=Modeus:MAILTO:noreply@modeus.org',
+      'DTSTAMP;TZID=' + timeZone + ':' + stamp,
+      'DTSTART;TZID=' + timeZone + ':' + compactDate(start),
+      'DTEND;TZID=' + timeZone + ':' + compactDate(end),
+      'SUMMARY:' + escapeText(summary),
+      'LOCATION:' + escapeText(String(record.location || '').trim()),
+      'DESCRIPTION:' + escapeText(description),
+      'CATEGORIES:' + escapeText(category),
+      'CATEGORIES:' + escapeText(course),
+      'END:VEVENT',
+    ];
+    const teacherNoteKey = noteNames.length ? JSON.stringify([subject, ...noteNames.map(normalizeName).sort()]) : '';
+    const groupKey = group ? JSON.stringify([subject, normalizeName(category), normalizeName(group)]) : '';
+    return { key: JSON.stringify([escapeText(uid), '', '']), sequence, stamp, summary, start, lines, teacher, noteNames, teacherNoteKey, groupKey };
+  }
+
+  function addHtmlPeriod(target, records, bounds, period) {
+    const timeZone = target.zone || zone;
+    const collectedAt = Date.now();
+    const matched = [];
+    let inPeriod = 0;
+    for (const record of records) {
+      const start = wallStamp(record.start, timeZone);
+      if (!Number.isFinite(start)) throw new Error('В HTML календаря неверное время начала занятия.');
+      if (start < period.first || start >= period.end) continue;
+      inPeriod++;
+      if (start >= bounds.start && start < bounds.end + day) matched.push(htmlEvent(record, start, timeZone, collectedAt));
+    }
+    mergeEvents(target.events, matched);
     return inPeriod;
   }
 
@@ -205,13 +310,70 @@
     return result;
   }
 
-  function serialize(target) {
-    const sorted = [...target.events.values()].sort((left, right) => left.start - right.start);
-    return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//ParaPlan//Modeus Export//RU', 'METHOD:PUBLISH',
-      ...[...target.zones.values()].flat(), ...sorted.flatMap(event => event.lines), 'END:VCALENDAR'].map(fold).join('\r\n') + '\r\n';
+  function teacherCandidates(events) {
+    const matches = new Map();
+    for (const { teacher, teacherNoteKey } of events) {
+      if (!teacherNoteKey) continue;
+      const names = teacherNames(teacher).filter(isFullName);
+      if (!names.length) continue;
+      if (!matches.has(teacherNoteKey)) matches.set(teacherNoteKey, new Map());
+      const candidates = matches.get(teacherNoteKey);
+      for (const name of names) candidates.set(normalizeName(name), name);
+    }
+    return matches;
   }
 
-  const api = { day, week, zone, isoDate, parseDate, monday, monthStart, months, modeusFilename, range, automaticRange, eventSpan, parse, addWeek, addPeriod, serialize };
+  function resolveTeacher(event, matches) {
+    const { teacher, teacherNoteKey } = event;
+    if (!teacherNoteKey) return teacher;
+    const names = teacherNames(teacher);
+    if (!names.some(isSupport)) return teacher;
+    const candidates = matches.get(teacherNoteKey);
+    if (names.some(isFullName)) return names.filter(name => !isSupport(name)).join(', ');
+    if (candidates?.size !== 1) return teacher;
+    const replacement = candidates.values().next().value;
+    return [...new Set(names.map(name => isSupport(name) ? replacement : name))].join(', ');
+  }
+
+  function groupTeachers(entries) {
+    const groups = new Map();
+    for (const { event, names } of entries) {
+      if (!event.groupKey) continue;
+      if (!groups.has(event.groupKey)) groups.set(event.groupKey, new Map());
+      const roster = groups.get(event.groupKey);
+      for (const name of names.filter(isFullName)) roster.set(normalizeName(name), name);
+    }
+    return new Map([...groups].map(([key, roster]) =>
+      [key, [...roster.values()].sort((first, second) => first.localeCompare(second, 'ru'))]));
+  }
+
+  function eventLines({ event, teacher, names }, groups) {
+    const { lines, noteNames } = event;
+    const roster = groups.get(event.groupKey);
+    if (names.length && names.every(isFullName) && (roster?.length > 1 || names.length > 1)) {
+      teacher = (roster || [...new Set(names)]).join(' и ');
+    }
+    if (teacher === event.teacher) return lines;
+
+    const before = escapeText('Преподаватель: ' + annotatedTeacher(event.teacher, noteNames));
+    const after = escapeText('Преподаватель: ' + annotatedTeacher(teacher, noteNames));
+    return lines.map(line => line.startsWith('DESCRIPTION:') ? line.replace(before, () => after) : line);
+  }
+
+  function serialize(target) {
+    const sorted = [...target.events.values()].sort((left, right) => left.start - right.start);
+    const matches = teacherCandidates(sorted);
+    const entries = sorted.map(event => {
+      const teacher = resolveTeacher(event, matches);
+      return { event, teacher, names: teacher ? teacherNames(teacher) : [] };
+    });
+    const groups = groupTeachers(entries);
+    return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//ParaPlan//Modeus Export//RU', 'METHOD:PUBLISH',
+      ...[...target.zones.values()].flat(), ...entries.flatMap(entry => eventLines(entry, groups)), 'END:VCALENDAR'].map(fold).join('\r\n') + '\r\n';
+  }
+
+  const api = { day, week, zone, isoDate, parseDate, monday, monthStart, months, modeusFilename, range, automaticRange, eventSpan,
+    parse, addWeek, addPeriod, addHtmlPeriod, serialize };
   if (typeof module !== 'undefined') module.exports = api;
   else root.ParaPlanCalendar = api;
 })(globalThis);

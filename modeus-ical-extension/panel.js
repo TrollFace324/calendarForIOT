@@ -3,15 +3,17 @@
 
   const panelId = 'para-plan-semester-export';
   const opened = document.getElementById(panelId);
-  if (opened) {
+  if (opened && opened === globalThis.ParaPlanPanel) {
     opened.shadowRoot.querySelector('h2').focus();
     return;
   }
+  opened?.remove();
 
   const calendar = ParaPlanCalendar;
   const isBatch = location.pathname.startsWith('/learning-path-selection/');
   const root = document.createElement('div');
   root.id = panelId;
+  globalThis.ParaPlanPanel = root;
   const shadow = root.attachShadow({ mode: 'open' });
   shadow.innerHTML = '<style>' +
     ':host{all:initial;position:fixed;inset:auto 16px 16px auto;z-index:2147483647;color:#222540;font:14px/1.45 system-ui,sans-serif}' +
@@ -19,28 +21,43 @@
     'header,.dates,.actions{display:flex;gap:8px;align-items:center}header{justify-content:space-between}h2{font-size:18px;margin:0;color:#332062}p{margin:8px 0;color:#484e69}' +
     'form{margin:12px 0}.dates label{display:grid;gap:4px;min-width:0;flex:1;font-size:12px;font-weight:650}input[type=date]{box-sizing:border-box;width:100%;font:inherit;padding:7px;border:1px solid #dcd9e6;border-radius:7px}' +
     'button{border:1px solid #ddd5ef;border-radius:8px;background:#fff;color:#372765;font:inherit;font-weight:650;padding:6px 9px;cursor:pointer}.primary{background:#6039cc;border-color:#6039cc;color:white}button:disabled{opacity:.45;cursor:default}' +
-    '.actions{flex-wrap:wrap}progress{width:100%;height:12px;accent-color:#6039cc}ul{max-height:175px;overflow:auto;margin:8px 0 0;padding-left:20px;font-size:12px;overflow-wrap:anywhere}' +
+    '.actions{flex-wrap:wrap}.progress-area{margin:12px 0;padding:10px 12px;border:1px solid #e4dafa;border-radius:10px;background:#faf7ff}' +
+    '.progress-heading{display:flex;justify-content:space-between;align-items:baseline;gap:8px;color:#332062;font-size:13px;font-weight:650}' +
+    '#progress-percent{font-variant-numeric:tabular-nums}progress{display:block;width:100%;height:12px;margin-top:6px;accent-color:#6039cc}' +
+    '.finish{margin-top:12px;padding:10px 12px;border:1px solid #e4dafa;border-radius:10px;background:#faf7ff}' +
+    '#finish-title{margin:0;color:#332062;font-weight:700}.finish p{overflow-wrap:anywhere}.finish button{margin-top:6px}#finish-feedback{color:#8e2c32}' +
+    'ul{max-height:175px;overflow:auto;margin:8px 0 0;padding-left:20px;font-size:12px;overflow-wrap:anywhere}' +
     '#courses{max-height:235px;overflow:auto;margin:8px 0}#courses label{display:flex;align-items:baseline;gap:6px;padding:3px 0;font-size:13px}#courses input{width:auto;accent-color:#6039cc}#courses strong{display:block;margin-top:8px;font-size:12px;color:#51407a}[hidden]{display:none!important}' +
     '</style><section aria-labelledby="heading">' +
     '<header><h2 id="heading" tabindex="-1">' + (isBatch ? 'Все дисциплины меню' : 'Экспорт Modeus') + '</h2><button type="button" id="close" aria-label="Закрыть сборщик">×</button></header>' +
     '<p>' + (isBatch ? 'У каждого меню выбора своя папка прямо в «Загрузках». Файлы сохраняются в разделы дисциплин.' : 'В фильтрах Modeus оставьте одну дисциплину.') + '</p>' +
     '<form id="period"><div class="dates"><label>От<input name="from" type="date" required></label><label>До (необязательно)<input name="to" type="date" aria-describedby="date-hint"></label></div><p id="date-hint">Если «До» пусто, сбор закончится после двух пустых месяцев подряд после занятий.</p></form>' +
     '<div class="actions"><button id="start" class="primary" form="period">' + (isBatch ? 'Выбрать дисциплины' : 'Собрать .ics') + '</button><button type="button" id="stop" hidden>Остановить</button><button type="button" id="retry" hidden>Повторить попытку</button><button type="button" id="save" hidden>Сохранить файл</button></div>' +
+    '<div id="progress-area" class="progress-area" hidden><div class="progress-heading"><label id="progress-label" for="progress">Ход сбора</label><span id="progress-percent" aria-hidden="true">0%</span></div><progress id="progress" max="100" value="0"></progress></div>' +
     '<p id="status" role="status"></p><div id="picker" hidden><div class="actions"><button type="button" id="all">Отметить все</button><button type="button" id="none">Снять все</button></div><div id="courses"></div><button type="button" class="primary" id="confirm">Собрать выбранные</button></div>' +
-    '<progress id="progress" hidden></progress><ul id="report" hidden></ul></section>';
+    '<div id="finish" class="finish" hidden><div role="status"><p id="finish-title"></p><p id="finish-details" hidden></p></div><button type="button" id="show-folder" hidden>Показать папку</button><p id="finish-feedback" role="status" hidden></p></div>' +
+    '<ul id="report" hidden></ul></section>';
   document.body.append(root);
 
   const find = id => shadow.getElementById(id);
   const form = find('period');
   const inputs = ['from', 'to'].map(name => form.elements.namedItem(name));
   const summary = find('status');
+  const progressArea = find('progress-area');
+  const progressLabel = find('progress-label');
   const progress = find('progress');
+  const percentage = find('progress-percent');
   const report = find('report');
+  const finish = find('finish');
+  const finishDetails = find('finish-details');
+  const folderButton = find('show-folder');
+  const folderFeedback = find('finish-feedback');
   const send = (action, properties) => chrome.runtime.sendMessage({ type: 'para-plan:' + action, ...properties });
   let job;
   let saved;
   let cancelSelection;
   let lastRun;
+  let folderTarget;
 
   function suggestedStart() {
     const stamp = isBatch ? ParaPlanMenu.selectionStart() : ParaPlanCollector.dateAt();
@@ -72,12 +89,53 @@
     const result = await send('save-ical', { token: active.token, startedAt: active.startedAt, name, text: calendar.serialize(active) });
     if (!result?.filename) throw new Error(result?.error || 'Не удалось сохранить расписание.');
     log(result.filename + (result.pending ? ' (проверьте загрузки Chrome).' : ''));
+    return result;
   }
 
   function setBusy(busy) {
     for (const control of [...inputs, find('start'), find('close')]) control.disabled = busy;
     find('stop').hidden = !busy;
     find('stop').disabled = false;
+  }
+
+  function showProgress(automatic) {
+    progress.value = 0;
+    percentage.textContent = '0%';
+    progressLabel.textContent = automatic ? 'Ход сбора (оценка)' : 'Ход сбора';
+    progressArea.hidden = false;
+  }
+
+  function updateProgress(fraction, complete = false) {
+    if (!Number.isFinite(fraction)) return;
+    const value = complete ? 100 : Math.min(99, Math.max(progress.value, Math.floor(fraction * 100)));
+    if (value !== progress.value) {
+      progress.value = value;
+      percentage.textContent = value + '%';
+    }
+    if (complete) progressLabel.textContent = 'Ход сбора';
+  }
+
+  function showStatus(text) {
+    if (summary.textContent !== text) summary.textContent = text;
+  }
+
+  function showFinish(title, token, result, details = '') {
+    folderTarget = Number.isInteger(result?.downloadId) ? { token, downloadId: result.downloadId } : null;
+    finish.hidden = false;
+    find('finish-title').textContent = title;
+    finishDetails.textContent = details;
+    finishDetails.hidden = !details;
+    folderButton.hidden = !folderTarget;
+    folderButton.disabled = false;
+    folderFeedback.hidden = true;
+  }
+
+  function showSingleFinish(active, result) {
+    const partial = !active.complete || active.stopped;
+    const title = partial ? 'Частичный экспорт' : 'Сбор завершён';
+    const details = !result ? 'За выбранный период занятий нет.'
+      : result.pending ? 'Chrome ещё сохраняет файл.' : 'Файл .ics сохранён.';
+    showFinish(title, active.token, result, details);
   }
 
   function log(message) {
@@ -139,6 +197,7 @@
 
   async function collectMenu(batch, from, to, retryRun) {
     let run = retryRun;
+    if (retryRun) showProgress(!to);
     const tasks = await ParaPlanMenu.scan(batch, text => { summary.textContent = text; }, async items => {
       if (retryRun) return items.filter(item => retryRun.retry.has(item.key));
       const selected = await chooseCourses(items, from, to);
@@ -150,30 +209,32 @@
         };
         report.replaceChildren();
         report.hidden = true;
+        showProgress(!to);
       }
       return selected;
     });
     if (batch.stopped) throw new Error('Сбор остановлен.');
     if (!run) return;
     if (!tasks.length) throw new Error('Не удалось найти недостающие дисциплины в текущем меню.');
-    progress.hidden = false;
-    progress.max = tasks.length;
-    progress.value = 0;
+    let processed = 0;
+    let authError = '';
     for (const [index, task] of tasks.entries()) {
       if (batch.stopped) break;
       const path = [...task.folders, task.name].join(' → ');
       const label = (index + 1) + ' из ' + tasks.length + ': ' + task.name;
       const previous = run.results.get(task.key);
+      const activeCourse = batch.activeCourse = { key: task.key, index, total: tasks.length, label };
       const result = task.href || previous?.pending
         ? await ParaPlanBatch.retryCourse(attempt => {
-          batch.label = label + ' — попытка ' + attempt + ' из ' + ParaPlanBatch.maxAttempts;
-          summary.textContent = batch.label + '. ' + (previous?.pending ? 'Проверяю загрузку…' : 'Открываю расписание…');
+          activeCourse.label = label + ' — попытка ' + attempt + ' из ' + ParaPlanBatch.maxAttempts;
+          summary.textContent = activeCourse.label + '. ' + (previous?.pending ? 'Проверяю загрузку…' : 'Открываю расписание…');
           return send('batch-course', {
             token: batch.token, startedAt: batch.startedAt, campaignId: batch.campaignId, campaignTitle: batch.campaignTitle, task, from, to,
             pending: previous?.pending ? { downloadId: previous.downloadId, count: previous.count, span: previous.span } : undefined,
           });
         }, () => batch.stopped)
         : { error: task.error || 'Нет ссылки на расписание.' };
+      batch.activeCourse = null;
       if (result.count || !batch.stopped) run.results.set(task.key, result);
       if (result.empty || (result.count && !result.pending)) run.retry.delete(task.key);
       if (batch.stopped) break;
@@ -184,18 +245,28 @@
       const previousLine = run.lines.get(task.key);
       if (previousLine) previousLine.textContent = line;
       else run.lines.set(task.key, log(line));
-      progress.value = index + 1;
-      if (result.auth) { summary.textContent = result.error; break; }
+      if (result.auth) { authError = result.error; break; }
+      processed++;
+      updateProgress(processed / tasks.length, processed === tasks.length);
     }
     const results = [...run.results.values()];
     const complete = results.filter(result => result.count && !result.pending).length;
     const empty = results.filter(result => result.empty).length;
     const pending = results.filter(result => result.pending).length;
     const failed = results.length - complete - empty - pending;
-    const prefix = batch.stopped ? 'Сбор остановлен. ' : progress.value < tasks.length ? 'Сбор прерван. ' : '';
+    const prefix = batch.stopped ? 'Сбор остановлен. ' : processed < tasks.length ? 'Сбор прерван. ' : '';
     const counts = 'Сохранено: ' + complete + ' из ' + run.total + '. Без занятий: ' + empty + '. Ошибок: ' + failed + '.';
-    summary.textContent = (progress.value < tasks.length && !batch.stopped ? summary.textContent + ' ' : '') +
-      prefix + counts + (pending ? ' Проверьте загрузки Chrome: ' + pending + '.' : '');
+    summary.textContent = (authError ? authError + ' ' : '') + prefix + counts +
+      (pending ? ' Проверьте загрузки Chrome: ' + pending + '.' : '');
+    const downloads = results.filter(result => Number.isInteger(result.downloadId));
+    const download = downloads.find(result => !result.pending) || downloads[0];
+    let title = 'Сбор завершён';
+    if (batch.stopped) title = 'Сбор остановлен';
+    else if (processed < tasks.length) title = 'Сбор прерван';
+    else if (failed) title = 'Сбор завершён с ошибками';
+    const details = pending ? 'Chrome ещё сохраняет файлы.'
+      : empty === run.total ? 'За выбранный период занятий нет.' : '';
+    showFinish(title, batch.token, download, details);
   }
 
   async function start(retryRun) {
@@ -216,28 +287,38 @@
       saved = null;
       find('save').hidden = true;
       find('retry').hidden = true;
-      progress.hidden = true;
+      progressArea.hidden = true;
+      finish.hidden = true;
+      folderTarget = null;
       setBusy(true);
       if (isBatch) {
         await collectMenu(job, from, to, retryRun);
       } else {
         report.replaceChildren();
         report.hidden = true;
-        progress.hidden = false;
-        if (bounds.automatic) progress.removeAttribute('value');
-        else { progress.max = bounds.days; progress.value = 0; }
-        await ParaPlanCollector.collect(job, text => {
-          summary.textContent = text;
-          if (job.complete) progress.value = progress.max;
-          else if (!bounds.automatic) progress.value = job.processed;
+        showProgress(bounds.automatic);
+        await ParaPlanCollector.collect(job, (text, fraction) => {
+          if (job.stopped) return;
+          showStatus(text);
+          updateProgress(fraction);
         });
-        if (job.events.size) await download(job);
+        if (job.stopped) throw new Error('Сбор остановлен.');
+        let result;
+        if (job.events.size) {
+          const collected = summary.textContent;
+          summary.textContent = 'Сохраняю файл…';
+          result = await download(job);
+          if (job.stopped) throw new Error('Сбор остановлен.');
+          summary.textContent = collected;
+        }
+        updateProgress(1, true);
+        showSingleFinish(job, result);
       }
     } catch (error) {
       summary.textContent = error.message + (!isBatch && job && !job.bounds.automatic ? ' Обработано дней: ' + job.processed + ' из ' + job.bounds.days + '.' : '');
     } finally {
       await job?.stopRequest;
-      if (isBatch && job) await send('batch-end', { token: job.token, focus: true }).catch(() => {});
+      if (isBatch && job) await send('batch-end', { token: job.token }).catch(() => {});
       if (!isBatch && job?.events.size) {
         saved = job;
         find('save').hidden = false;
@@ -258,13 +339,16 @@
   });
 
   function onProgress(message, sender) {
-    if (sender.id === chrome.runtime.id && message?.type === 'para-plan:batch-progress' && job && !job.stopped && job.token === message.token) {
-      summary.textContent = job.label + '. ' + message.text;
-    }
+    const course = job?.activeCourse;
+    if (sender.id !== chrome.runtime.id || message?.type !== 'para-plan:batch-progress' || !course ||
+        job.stopped || job.token !== message.token || course.key !== message.taskKey) return;
+    showStatus(course.label + '. ' + message.text);
+    updateProgress((course.index + message.fraction) / course.total);
   }
   if (isBatch) chrome.runtime.onMessage.addListener(onProgress);
   find('close').addEventListener('click', () => {
     if (isBatch) chrome.runtime.onMessage.removeListener(onProgress);
+    delete globalThis.ParaPlanPanel;
     root.remove();
   });
   find('stop').addEventListener('click', () => {
@@ -273,14 +357,41 @@
     cancelSelection?.();
     find('stop').disabled = true;
     summary.textContent = 'Останавливаю сбор…';
-    if (isBatch) job.stopRequest = send('batch-stop', { token: job.token, focus: true }).catch(() => {});
+    if (isBatch) job.stopRequest = send('batch-stop', { token: job.token }).catch(() => {});
   });
   find('save').addEventListener('click', async event => {
     const button = event.currentTarget;
+    const active = saved;
     button.disabled = true;
-    try { await download(saved); }
+    try {
+      const result = await download(active);
+      if (result && saved === active) {
+        if (active.complete && !active.stopped && progress.value < 100) {
+          showStatus(result.pending ? 'Расписание собрано. Проверьте загрузки Chrome.' : 'Расписание собрано. Файл сохранён.');
+          updateProgress(1, true);
+        }
+        showSingleFinish(active, result);
+      }
+    }
     catch (error) { log(error.message); }
     finally { button.disabled = false; }
+  });
+  folderButton.addEventListener('click', async () => {
+    const target = folderTarget;
+    if (!target) return;
+    folderButton.disabled = true;
+    folderFeedback.hidden = true;
+    try {
+      const result = await send('show-folder', target);
+      if (!result?.shown) throw new Error(result?.error || 'Не удалось показать папку.');
+    } catch (error) {
+      if (folderTarget === target) {
+        folderFeedback.textContent = error.message;
+        folderFeedback.hidden = false;
+      }
+    } finally {
+      if (folderTarget === target) folderButton.disabled = false;
+    }
   });
   find('heading').focus();
 })();

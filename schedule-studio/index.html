@@ -33,17 +33,17 @@
         <button class="tab" id="calendar-tab" data-action="view" data-view="calendar"><svg class="icon"><use href="#i-grid"/></svg>Расписание</button>
         <button class="tab" id="subjects-tab" data-action="view" data-view="subjects"><svg class="icon"><use href="#i-book"/></svg>Дисциплины <span id="subject-count" class="tab-count">0</span></button>
       </nav>
-      <button class="button primary top-import" data-action="import"><svg class="icon"><use href="#i-upload"/></svg>Импорт ICS</button>
+      <div class="source-actions" id="source-actions">
+        <button type="button" class="button primary" id="add-campaign" data-action="add-campaign"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg>Добавить выбор</button>
+      </div>
+      <div class="schedule-actions" id="schedule-actions" hidden>
+        <button type="button" id="edit-plan" class="button primary" data-action="edit-plan">Изменить приоритеты</button>
+        <button type="button" id="export-button" class="button secondary" data-action="export"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Скачать .ics</button>
+      </div>
     </div>
   </header>
 
   <main class="workspace">
-    <section class="intro">
-      <div><div class="eyebrow"><span></span> УЧЕБНЫЙ ПЛАНИРОВЩИК</div><h1 id="page-title">Моё расписание</h1><p id="page-caption">Соберите подходящую неделю из расписаний разных дисциплин.</p></div>
-      <div class="intro-actions"><button id="edit-plan" class="button secondary" data-action="edit-plan" hidden>Изменить приоритеты</button>
-        <button id="export-button" class="button secondary" data-action="export" hidden><svg class="icon"><use href="#i-download"/></svg>Скачать .ics</button></div>
-    </section>
-
     <p id="notice" class="notice" role="status" hidden></p>
     <section id="plan-step" class="panel plan-step" hidden>
       <div><h2>Настройка плана</h2><p id="plan-help" class="subhead" role="status">Проверьте дисциплины и глобальные ограничения. Затем постройте расписание.</p></div>
@@ -51,23 +51,42 @@
     </section>
     <section id="stats" class="stats" aria-label="Сводка"></section>
 
-    <div class="layout">
-      <section id="calendar-panel" class="panel calendar" aria-label="Недельное расписание">
-        <div class="calendar-toolbar">
-          <div><div class="section-label">НЕДЕЛЬНЫЙ ВИД</div><h2 id="week-title"></h2></div>
-          <div class="week-controls">
-            <button class="button square" data-action="prev" aria-label="Предыдущая неделя"><svg class="icon"><use href="#i-left"/></svg></button>
-            <button class="button secondary" data-action="today">Сегодня</button>
-            <button class="button square" data-action="next" aria-label="Следующая неделя"><svg class="icon"><use href="#i-right"/></svg></button>
+    <div class="layout" id="page-layout">
+      <section id="calendar-panel" class="calendar-results" aria-label="Варианты расписания">
+        <div class="panel calendar-toolbar">
+          <div class="calendar-week">
+            <div><div class="section-label">НЕДЕЛЬНЫЙ ВИД</div><h2 id="week-title"></h2></div>
+            <div class="week-controls" role="group" aria-label="Выбор недели">
+              <button type="button" class="button square" data-action="prev" aria-label="Предыдущая неделя"><svg class="icon" aria-hidden="true"><use href="#i-left"/></svg></button>
+              <button type="button" class="button secondary" data-action="today">Сегодня</button>
+              <button type="button" class="button square" data-action="next" aria-label="Следующая неделя"><svg class="icon" aria-hidden="true"><use href="#i-right"/></svg></button>
+            </div>
           </div>
         </div>
-        <div class="calendar-viewport" id="calendar-viewport" tabindex="0" aria-label="Сетка недели"><div id="week-grid"></div></div>
-        <div class="calendar-footer"><span><svg class="icon"><use href="#i-clock"/></svg> Екатеринбург · UTC+5</span><span id="calendar-footnote"></span></div>
+        <div id="schedule-results" class="schedule-results"></div>
       </section>
+
+      <aside class="calendar-sidebar" id="calendar-sidebar" aria-label="Управление расписанием" hidden>
+        <div class="calendar-summary" id="calendar-summary">
+          <button type="button" class="button secondary plan-groups-button" data-action="show-plan-groups"
+            aria-haspopup="dialog" aria-controls="modal" aria-label="Какие группы выбрать" title="Какие группы выбрать">
+            <svg class="icon" aria-hidden="true"><use href="#i-book"/></svg>
+            <span class="plan-groups-full">Какие группы выбрать</span><span class="plan-groups-short">Группы</span>
+          </button>
+        </div>
+        <section id="variant-controls" class="panel variant-controls" aria-labelledby="schedule-changes-title" hidden>
+          <div class="schedule-changes-heading">
+            <h2 id="schedule-changes-title">Изменения расписания</h2>
+            <p id="variant-position" role="status" aria-atomic="true"></p>
+            <button type="button" class="button secondary" data-action="reset-schedule-changes" disabled>Вернуть лучшее</button>
+          </div>
+          <div id="schedule-change-list" class="comparison-list" role="region" aria-label="Список изменений расписания" tabindex="0"></div>
+        </section>
+      </aside>
 
       <section id="subjects-panel" hidden aria-label="Дисциплины и файлы"></section>
 
-      <aside class="sidebar">
+      <aside class="sidebar" id="settings-sidebar">
         <section class="panel conflict-panel" id="mandatory" aria-label="Обязательные пары" hidden></section>
         <section class="panel priority-panel" id="rules-panel" aria-label="Глобальные приоритеты">
           <div class="panel-heading"><span class="tile blue"><svg class="icon"><use href="#i-clock"/></svg></span><div><h2>Глобальные приоритеты</h2><p>Пожелания и жёсткие ограничения</p></div></div>
@@ -82,13 +101,14 @@
             <div class="rule-times"><label class="form-label">Не раньше<input type="time" name="earliest"></label><label class="form-label">Не позже<input type="time" name="latest"></label></div>
             <p class="panel-hint">Время Екатеринбурга. Ограничения действуют на пары, для которых есть выбор. Нарушения для обязательных пар отмечаются отдельно.</p>
           </form>
+          <div id="manual-lesson-controls" class="manual-lesson-controls"></div>
         </section>
-        <section class="panel conflict-panel" id="conflicts" aria-label="Конфликты"></section>
       </aside>
     </div>
     <footer class="page-footer"><span>Пара.План</span><span>Файлы обрабатываются в вашем браузере</span></footer>
   </main>
 
+  <section id="lesson-preview" class="lesson-preview" aria-labelledby="lesson-preview-title" hidden></section>
   <dialog id="modal" aria-labelledby="modal-title"><div id="modal-content"></div></dialog>
 </body>
 </html>

@@ -53,6 +53,14 @@
     const oldRoute = location.pathname;
     const oldName = normalize(heading()?.textContent);
     const linkSelector = '.card-header a[href*="/schedule-calendar/my"]';
+    const calendarLink = () => {
+      const anchor = document.querySelector(linkSelector);
+      if (!visible(anchor)) return null;
+      try {
+        const url = new URL(anchor.href);
+        return batch.calendarPage(url) && batch.courseKey(url) ? anchor : null;
+      } catch { return null; }
+    };
     const read = () => {
       const table = [...document.querySelectorAll('tr.row.root')].find(visible)?.parentElement;
       const rows = [...(table?.querySelectorAll(':scope > tr.row') || [])].filter(visible);
@@ -79,13 +87,14 @@
 
     async function waitFor(predicate, duration, guard = ensure) {
       const deadline = Date.now() + duration;
-      do {
+      while (true) {
         guard();
         const value = predicate();
         if (value) return value;
-        await pause(115);
-      } while (Date.now() < deadline);
-      return null;
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) return null;
+        await pause(Math.min(115, remaining));
+      }
     }
 
     async function setExpanded(entry, expanded, guard = ensure) {
@@ -129,30 +138,40 @@
         update('Читаю карточку ' + (index + 1) + ' из ' + selectedItems.length + ': ' + item.name);
         let href = '';
         let error;
-        const previousRoute = location.pathname;
-        const previousAnchor = document.querySelector(linkSelector);
-        const previousLink = previousAnchor?.href;
-        const previousName = normalize(heading()?.textContent);
-        let initiallySelected;
+        let previousRoute = location.pathname;
+        const previousLink = calendarLink()?.href;
+        let reusePrevious;
+        const selectedCard = entry => entry?.row.classList.contains('p-highlight') &&
+          normalize(heading()?.textContent) === item.name;
+        const confirmedLink = () => {
+          const title = heading();
+          const candidate = calendarLink();
+          if (!candidate || !visible(title) || normalize(title.textContent) !== item.name) return null;
+          const row = get(item.key)?.row;
+          const selected = row?.classList.contains('p-highlight');
+          if (candidate.href === previousLink) return reusePrevious && selected ? candidate : null;
+          return selected || (!row && location.pathname !== previousRoute) ? candidate : null;
+        };
         for (let attempt = 0; attempt < batch.maxAttempts && !href; attempt++) {
-          const entry = await findCourse(item);
+          let entry = await findCourse(item);
+          reusePrevious ??= location.pathname === previousRoute && Boolean(selectedCard(entry));
+          if (attempt === 1 && selectedCard(entry) && !confirmedLink()) {
+            const close = document.querySelector('.card-header .close-button');
+            if (visible(close)) {
+              close.click();
+              if (await waitFor(() => !visible(heading()) && !visible(document.querySelector(linkSelector)), 3000)) {
+                previousRoute = location.pathname;
+                reusePrevious = false;
+              }
+              entry = await findCourse(item);
+            }
+          }
           if (!entry) {
             error = 'Не удалось снова найти дисциплину в меню.';
             continue;
           }
-          const selected = entry.row.classList.contains('p-highlight');
-          initiallySelected ??= location.pathname === previousRoute && selected;
-          if (!selected || normalize(heading()?.textContent) !== item.name) entry.row.cells[0].click();
-          const anchor = await waitFor(() => {
-            const candidate = document.querySelector(linkSelector);
-            if (!visible(candidate) || !visible(heading())) return null;
-            const rowSelected = get(item.key)?.row.classList.contains('p-highlight');
-            const sameName = normalize(heading()?.textContent) === item.name;
-            if (!sameName) return null;
-            if (rowSelected && (initiallySelected || candidate.href !== previousLink ||
-              (previousName !== item.name && candidate !== previousAnchor && location.pathname !== previousRoute))) return candidate;
-            return location.pathname !== previousRoute && candidate.href !== previousLink ? candidate : null;
-          }, attempt === 0 ? 7500 : 12000);
+          if (!selectedCard(entry)) entry.row.cells[0].click();
+          const anchor = await waitFor(confirmedLink, attempt === 0 ? 7500 : 12000);
           if (anchor) href = anchor.href;
           else error = 'Не удалось подтвердить ссылку «Расписание модуля» в карточке дисциплины.';
         }
