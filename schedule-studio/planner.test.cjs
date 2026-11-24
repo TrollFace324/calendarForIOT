@@ -25,6 +25,17 @@ function manual(overrides = {}) {
     teacher: 'Преподаватель', repeat: 'once', parity: 'odd', until: '', ...overrides };
 }
 
+test('отмечает занятие единственной группы как не имеющее альтернативы по времени', () => {
+  const fixedLab = { ...lesson('Физика', 'ПА-01', 24, 17, 40, 90), activity: 'Лабораторная 11', kind: 'lab' };
+  const first = { ...lesson('Физика', 'ПА-01', 25, 10, 15, 90), activity: 'Практика', kind: 'practice' };
+  const second = { ...lesson('Физика', 'ПА-02', 26, 10, 15, 90), activity: 'Практика', kind: 'practice' };
+  const subject = Planner.organize([{ events: [fixedLab, first, second] }]).subjects.get('Физика');
+  const chosen = subject.options.find(option => option.group === 'ПА-01');
+  assert.ok(chosen.flexible.includes(fixedLab));
+  assert.deepEqual(chosen.unavoidable, [fixedLab]);
+  assert.deepEqual(subject.options.find(option => option.group === 'ПА-02').unavoidable, []);
+});
+
 const localDates = events => events.map(event => new Date(Planner.wallTime(event.start)).toISOString().slice(0, 10));
 
 test('определяет вид пары по данным Modeus и сохраняет его при экспорте', () => {

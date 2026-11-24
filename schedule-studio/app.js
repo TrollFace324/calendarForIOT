@@ -237,6 +237,22 @@
     const title = variantTitle(activeVariant);
     const summary = [typeof plan.windowCount === 'number' && windowSummary(plan), result.limited && 'Достигнут лимит подбора']
       .filter(Boolean).join(' · ');
+    const warningGroups = new Map();
+    if (ranked) for (const event of plan.events) {
+      const warning = lessonWarning(event, plan);
+      if (!warning) continue;
+      if (!warningGroups.has(event.subject)) warningGroups.set(event.subject, []);
+      warningGroups.get(event.subject).push({ event, warning });
+    }
+    const warningCount = [...warningGroups.values()].reduce((count, items) => count + items.length, 0);
+    const warningsOpen = byId('schedule-results').querySelector('.schedule-warnings')?.open;
+    const warningList = warningCount ? `<details class="schedule-warnings" ${warningsOpen ? 'open' : ''}>
+      <summary>Пары с нарушенными пожеланиями · ${warningCount}</summary>
+      <p class="schedule-warnings-note">Такие конфликты часто неизбежны: выбранные дисциплины и обязательные пары важнее пожеланий. Примерно в 90% случаев это нормально.</p>
+      ${[...warningGroups].map(([subject, items]) => `<section class="schedule-warning-group"><h4>${escape(subject)} · ${items.length}</h4><ul>${items.map(({ event, warning }) =>
+        `<li><strong>${dateShort.format(wallTime(event.start))} · ${interval(event)} · ${escape(event.group || event.activity)}</strong>
+          <span>Нарушено: ${escape(warning.criteria.join(', '))}</span><span>${escape(warning.reason)}</span></li>`).join('')}</ul></section>`).join('')}
+    </details>` : '';
     const empty = !lessons.length && (!hasSchedule()
       ? `${tile('calendar', 'violet')}<h3>Добавьте расписание</h3><p>Выберите папку с расписанием из Modeus или откройте пример.</p><div class="empty-actions">${action('add-campaign', 'Выбрать папку', 'primary', 'upload')}${action('demo', 'Открыть пример', 'secondary', 'spark')}</div>`
       : `${tile('calendar', 'violet')}<h3>На этой неделе нет выбранных пар</h3><p>${plan.conflicts.length ? 'Проверьте конфликты или перейдите к другой неделе.' : 'Перелистните недели или проверьте настройки дисциплин.'}</p>`);
@@ -264,7 +280,7 @@
     return `<article class="panel calendar schedule-option" ${ranked ? 'aria-labelledby="schedule-option-title"' : ''}>
       ${ranked ? `<header class="schedule-option-header">
         <div class="schedule-option-heading"><h3 id="schedule-option-title">${title}</h3>
-          ${summary ? `<p>${summary}</p>` : ''}</div></header>` : ''}
+          ${summary ? `<p>${summary}</p>` : ''}</div>${warningList}</header>` : ''}
       <div class="calendar-viewport" tabindex="0" aria-label="${ranked ? 'Сетка недели · ' + title : 'Сетка недели'}"><div class="week-grid">${grid}</div></div>
       <div class="calendar-footer"><span>${icon('clock')} Екатеринбург · UTC+5</span></div>
     </article>`;
@@ -907,10 +923,10 @@
       if (previous && (event.start - previous.end) / MINUTE >= 90) criteria.push(criterionNames.gaps);
     }
     if (!criteria.length) return null;
-    const fixed = plan.events.some(item => item.id === event.id) && ![...plan.selected.values()].some(item => item.flexible.some(part => part.id === event.id));
-    const reason = fixed ? subject
-      ? 'Это обязательная пара выбранной дисциплины: у неё нет замены в других группах.'
-      : 'Эта пара добавлена вручную как обязательная, поэтому планировщик должен её сохранить.'
+    const fixed = ![...plan.selected.values()].some(item => item.flexible.some(part => part.id === event.id)) ||
+      Boolean(option?.unavoidable.some(item => item.id === event.id));
+    const reason = event.manualId ? 'Эта пара добавлена вручную как обязательная, поэтому планировщик должен её сохранить.'
+      : fixed ? 'Это обязательная пара выбранной дисциплины: у неё нет замены в других группах.'
       : subject && state.pins[subject.id] === option?.id ? 'Эта группа закреплена вручную, поэтому планировщик должен её сохранить.'
         : activeVariant ? 'Пара входит в выбранный запасной вариант расписания. Вернитесь к лучшему варианту или измените настройки дисциплины.'
           : 'Дисциплина включена в план. Планировщик сначала сохраняет выбранные дисциплины, затем сравнивает совместимые группы по порядку критериев.';

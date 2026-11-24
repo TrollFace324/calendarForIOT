@@ -229,7 +229,7 @@
       const variable = activities.filter(({ groups }) => [...groups.keys()].filter(Boolean).length > 1);
       const selectableGroups = new Map();
       for (const { groups } of variable) {
-        for (const group of groups.keys()) if (group) selectableGroups.set(group, { parts: [], missing: [] });
+        for (const group of groups.keys()) if (group) selectableGroups.set(group, { parts: [], missing: [], unavoidable: [] });
       }
       for (const [group, option] of selectableGroups) {
         option.missing = variable.filter(part => !part.groups.has(group)).map(part => part.activity);
@@ -242,7 +242,10 @@
         for (const [group, lessons] of groups) {
           const option = selectableGroups.get(group);
           // In legacy imports, an uncategorized singleton from an incomplete option may be a shared lecture.
-          if (option && (hasAlternatives || kind || !option.missing.length)) option.parts.push(lessons);
+          if (option && (hasAlternatives || kind || !option.missing.length)) {
+            option.parts.push(lessons);
+            if (!hasAlternatives) option.unavoidable.push(...lessons);
+          }
           else subject.fixed.push({ activity, group, events: lessons });
         }
       }
@@ -253,7 +256,8 @@
         const missing = option?.missing || [];
         const flexible = option?.parts.flat().sort(byStart) || [];
         const internal = flexible.some((event, index) => index > 0 && overlaps(event, flexible[index - 1]));
-        return { id: key(subject.id, group), group, events: fixedEvents.concat(flexible).sort(byStart), flexible, missing, internal };
+        return { id: key(subject.id, group), group, events: fixedEvents.concat(flexible).sort(byStart), flexible,
+          unavoidable: option?.unavoidable || [], missing, internal };
       });
       delete subject.activities;
     }
