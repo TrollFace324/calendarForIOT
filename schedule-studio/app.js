@@ -258,7 +258,8 @@
         const lessonClasses = `lesson lesson-${kind}${physicalEducation ? ' lesson-physical-education' : ''}`;
         const top = percent(start - min);
         const height = percent(end - start);
-        return `<button type="button" class="${lessonClasses}" data-action="lesson" data-key="${attr(event.id)}" aria-label="${attr(label)}" aria-haspopup="dialog" style="${sides}top:calc(${top}% + 1px);height:max(0px, calc(${height}% - 2px))"><span class="lesson-time">${interval(event)}</span><span class="lesson-title">${escape(event.subject)}</span><span class="lesson-sub">${escape(event.group || event.activity)}</span></button>`;
+        const warning = lessonWarning(event, plan);
+        return `<button type="button" class="${lessonClasses}${warning ? ' lesson-has-warning' : ''}" data-action="lesson" data-key="${attr(event.id)}" aria-label="${attr(label)}${warning ? ' · Нарушено пожелание: ' + attr(warning.criteria.join(', ')) : ''}" aria-haspopup="dialog" style="${sides}top:calc(${top}% + 1px);height:max(0px, calc(${height}% - 2px))"><span class="lesson-time">${interval(event)}</span><span class="lesson-title">${escape(event.subject)}</span><span class="lesson-sub">${escape(event.group || event.activity)}</span>${warning ? '<span class="lesson-warning-mark" aria-hidden="true">!</span>' : ''}</button>`;
       }).join('')}</div>`).join('')}${empty ? `<div class="calendar-empty empty">${empty}</div>` : ''}`;
     return `<article class="panel calendar schedule-option" ${ranked ? 'aria-labelledby="schedule-option-title"' : ''}>
       ${ranked ? `<header class="schedule-option-header">
@@ -873,7 +874,47 @@
 
   function lessonDetails(event) {
     const location = /^https?:\/\/[^\s]+$/i.test(event.location) ? `<a href="${attr(event.location)}" target="_blank" rel="noopener noreferrer">Открыть ссылку</a>` : escape(event.location || 'Не указано');
-    return `<dl class="event-details"><dt>Занятие</dt><dd>${escape(event.title)}</dd><dt>Дата и время</dt><dd>${dateFull.format(wallTime(event.start))} · ${interval(event)}</dd><dt>Подгруппа</dt><dd>${escape(event.group || 'Без подгруппы')}</dd><dt>Место</dt><dd>${location}</dd>${event.teacher ? `<dt>Преподаватель</dt><dd>${escape(event.teacher)}</dd>` : ''}</dl>`;
+    const warning = lessonWarning(event, schedules()[activeVariant]);
+    return `${warning ? `<div class="lesson-warning" role="note"><strong>Пожелание нарушено: ${escape(warning.criteria.join(', '))}</strong><p>${escape(warning.reason)}</p></div>` : ''}<dl class="event-details"><dt>Занятие</dt><dd>${escape(event.title)}</dd><dt>Дата и время</dt><dd>${dateFull.format(wallTime(event.start))} · ${interval(event)}</dd><dt>Подгруппа</dt><dd>${escape(event.group || 'Без подгруппы')}</dd><dt>Место</dt><dd>${location}</dd>${event.teacher ? `<dt>Преподаватель</dt><dd>${escape(event.teacher)}</dd>` : ''}</dl>`;
+  }
+
+  function lessonWarning(event, plan) {
+    if (!state.planReady || !plan) return null;
+    const prefs = state.preferences;
+    const order = prefs.order;
+    const local = wallTime(event.start);
+    const day = new Date(local).getUTCDay();
+    const criteria = [];
+    if (order.includes('saturday') && day === 6) criteria.push(criterionNames.saturday);
+    if (order.includes('days') && prefs.unwantedDays.includes(day)) criteria.push(criterionNames.days);
+    if (order.includes('time')) {
+      const start = local % DAY / MINUTE;
+      const end = wallTime(event.end) % DAY / MINUTE;
+      if ((prefs.earliest && start < clockOffset(prefs.earliest) / MINUTE) ||
+          (prefs.latest && end > clockOffset(prefs.latest) / MINUTE)) criteria.push(criterionNames.time);
+    }
+    const subject = [...model.subjects.values()].find(item => item.name === event.subject);
+    const option = subject && plan.selected.get(subject.id);
+    if (option?.flexible.some(item => item.id === event.id)) {
+      if (order.includes('groups') && Number(prefs.groups[option.id]) < 0) criteria.push(criterionNames.groups);
+      if (order.includes('teachers') && teacherNames([event]).some(name => teacherRating(prefs.teachers[event.subject], name) < 0))
+        criteria.push(criterionNames.teachers);
+    }
+    if (order.includes('gaps') && prefs.gaps === 'prefer') {
+      const sameDay = plan.events.filter(item => Math.floor(wallTime(item.start) / DAY) === Math.floor(local / DAY))
+        .sort((first, second) => first.start - second.start);
+      const previous = sameDay[sameDay.findIndex(item => item.id === event.id) - 1];
+      if (previous && (event.start - previous.end) / MINUTE >= 90) criteria.push(criterionNames.gaps);
+    }
+    if (!criteria.length) return null;
+    const fixed = plan.events.some(item => item.id === event.id) && ![...plan.selected.values()].some(item => item.flexible.some(part => part.id === event.id));
+    const reason = fixed ? subject
+      ? 'Это обязательная пара выбранной дисциплины: у неё нет замены в других группах.'
+      : 'Эта пара добавлена вручную как обязательная, поэтому планировщик должен её сохранить.'
+      : subject && state.pins[subject.id] === option?.id ? 'Эта группа закреплена вручную, поэтому планировщик должен её сохранить.'
+        : activeVariant ? 'Пара входит в выбранный запасной вариант расписания. Вернитесь к лучшему варианту или измените настройки дисциплины.'
+          : 'Дисциплина включена в план. Планировщик сначала сохраняет выбранные дисциплины, затем сравнивает совместимые группы по порядку критериев.';
+    return { criteria, reason };
   }
 
   function lessonFor(card) {

@@ -147,6 +147,10 @@ dialog:has(.plan-group-list){width:min(660px,calc(100% - 24px))}
 @media(max-width:460px){.plan-group-row{grid-template-columns:minmax(0,1fr);gap:2px}}
 .lesson-preview{position:fixed;z-index:10;width:min(330px,calc(100vw - 16px));max-height:calc(100dvh - 16px);overflow:auto;overscroll-behavior:contain;padding:12px 14px;border:1px solid var(--line);border-radius:11px;background:var(--surface);box-shadow:0 10px 24px #24315526}
 .lesson-preview h2{margin-bottom:8px;font-size:15px;line-height:1.28;overflow-wrap:anywhere}
+.lesson-has-warning{outline:2px solid var(--amber);outline-offset:-2px}
+.lesson-warning-mark{position:absolute;right:4px;top:4px;display:grid;place-items:center;width:17px;height:17px;border-radius:50%;background:var(--amber);color:#fff;font-size:12px;font-weight:800}
+.lesson-warning{margin:0 0 10px;padding:9px 10px;border:1px solid var(--amber);border-radius:8px;background:#fff7e9;font-size:12px;line-height:1.4}
+.lesson-warning p{margin:4px 0 0}
 .lesson-preview .event-details{grid-template-columns:max-content minmax(0,1fr);gap:6px 10px;font-size:12px}
 .source-folder{margin:14px 0 5px;color:var(--muted);font-size:13px;overflow-wrap:anywhere}
 .folder-picker{border:1px dashed #abbdde;background:#f7f9ff;border-radius:12px;padding:13px}
