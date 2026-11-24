@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f7f8fc">
+  <title>Пара.План — конструктор расписания</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="planner.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <svg class="sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M16 3v4M8 3v4M3 10h18m-13 5h2m4 0h2"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4m-5 5 5-5 5 5M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></symbol>
+    <symbol id="i-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+    <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h13v18H6a2 2 0 0 1 0-4h13M4 5v14M8 7h7"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 4a2 2 0 0 1 3.4 0l7.8 13a2 2 0 0 1-1.7 3H4.2a2 2 0 0 1-1.7-3l7.8-13ZM12 9v4m0 3h.01"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M9 9v12m6-12v12"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Zm0 0v6h6M8 13h8m-8 4h5"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="m12 2 2.6 7.4L22 12l-7.4 2.6L12 22l-2.6-7.4L2 12l7.4-2.6L12 2Z"/></symbol>
+  </svg>
+
+  <header class="topbar">
+    <div class="top-inner">
+      <button class="brand" data-action="view" data-view="calendar" aria-label="Пара.План — расписание"><span class="brand-icon"><svg class="icon"><use href="#i-calendar"/></svg></span>Пара<span class="brand-period">.</span>План</button>
+      <nav aria-label="Разделы">
+        <button class="tab" id="calendar-tab" data-action="view" data-view="calendar"><svg class="icon"><use href="#i-grid"/></svg>Расписание</button>
+        <button class="tab" id="subjects-tab" data-action="view" data-view="subjects"><svg class="icon"><use href="#i-book"/></svg>Дисциплины <span id="subject-count" class="tab-count">0</span></button>
+      </nav>
+      <div class="source-actions" id="source-actions">
+        <button type="button" class="button primary" id="add-campaign" data-action="add-campaign"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg>Добавить выбор</button>
+      </div>
+      <div class="schedule-actions" id="schedule-actions" hidden>
+        <button type="button" id="edit-plan" class="button primary" data-action="edit-plan">Изменить приоритеты</button>
+        <button type="button" id="export-button" class="button secondary" data-action="export"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Скачать .ics</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <p id="notice" class="notice" role="status" hidden></p>
+    <section id="plan-step" class="panel plan-step" hidden>
+      <div><h2>Настройка плана</h2><p id="plan-help" class="subhead" role="status">Проверьте дисциплины и глобальные ограничения. Затем постройте расписание.</p></div>
+      <button id="build-plan" type="submit" form="rules-form" class="button primary" aria-describedby="plan-help"><svg class="icon"><use href="#i-check"/></svg>Построить расписание</button>
+    </section>
+    <section id="stats" class="stats" aria-label="Сводка"></section>
+
+    <div class="layout" id="page-layout">
+      <section id="calendar-panel" class="calendar-results" aria-label="Варианты расписания">
+        <div class="panel calendar-toolbar">
+          <div class="calendar-week">
+            <div><div class="section-label">НЕДЕЛЬНЫЙ ВИД</div><h2 id="week-title"></h2></div>
+            <div class="week-controls" role="group" aria-label="Выбор недели">
+              <button type="button" class="button square" data-action="prev" aria-label="Предыдущая неделя"><svg class="icon" aria-hidden="true"><use href="#i-left"/></svg></button>
+              <button type="button" class="button secondary" data-action="today">Сегодня</button>
+              <button type="button" class="button square" data-action="next" aria-label="Следующая неделя"><svg class="icon" aria-hidden="true"><use href="#i-right"/></svg></button>
+            </div>
+          </div>
+        </div>
+        <div id="schedule-results" class="schedule-results"></div>
+      </section>
+
+      <aside class="calendar-sidebar" id="calendar-sidebar" aria-label="Управление расписанием" hidden>
+        <div class="calendar-summary" id="calendar-summary">
+          <button type="button" class="button secondary plan-groups-button" data-action="show-plan-groups"
+            aria-haspopup="dialog" aria-controls="modal" aria-label="Какие группы выбрать" title="Какие группы выбрать">
+            <svg class="icon" aria-hidden="true"><use href="#i-book"/></svg>
+            <span class="plan-groups-full">Какие группы выбрать</span><span class="plan-groups-short">Группы</span>
+          </button>
+        </div>
+        <section id="variant-controls" class="panel variant-controls" aria-labelledby="schedule-changes-title" hidden>
+          <div class="schedule-changes-heading">
+            <h2 id="schedule-changes-title">Изменения расписания</h2>
+            <p id="variant-position" role="status" aria-atomic="true"></p>
+            <button type="button" class="button secondary" data-action="reset-schedule-changes" disabled>Вернуть лучшее</button>
+          </div>
+          <div id="schedule-change-list" class="comparison-list" role="region" aria-label="Список изменений расписания" tabindex="0"></div>
+        </section>
+      </aside>
+
+      <section id="subjects-panel" hidden aria-label="Дисциплины и файлы"></section>
+
+      <aside class="sidebar" id="settings-sidebar">
+        <section class="panel conflict-panel" id="mandatory" aria-label="Обязательные пары" hidden></section>
+        <section class="panel priority-panel" id="rules-panel" aria-label="Глобальные приоритеты">
+          <div class="panel-heading"><span class="tile blue"><svg class="icon"><use href="#i-clock"/></svg></span><div><h2>Глобальные приоритеты</h2><p>Пожелания и жёсткие ограничения</p></div></div>
+          <div id="preference-controls"></div>
+          <form id="rules-form" class="rules-form">
+            <fieldset><legend>Запретить пары в эти дни</legend><div class="rule-days">
+              <label><input type="checkbox" name="day" value="1">Пн</label><label><input type="checkbox" name="day" value="2">Вт</label>
+              <label><input type="checkbox" name="day" value="3">Ср</label><label><input type="checkbox" name="day" value="4">Чт</label>
+              <label><input type="checkbox" name="day" value="5">Пт</label><label><input type="checkbox" name="day" value="6">Сб</label>
+              <label><input type="checkbox" name="day" value="0">Вс</label>
+            </div></fieldset>
+            <div class="rule-times"><label class="form-label">Не раньше<input type="time" name="earliest"></label><label class="form-label">Не позже<input type="time" name="latest"></label></div>
+            <p class="panel-hint">Время Екатеринбурга. Ограничения действуют на пары, для которых есть выбор. Нарушения для обязательных пар отмечаются отдельно.</p>
+          </form>
+          <div id="manual-lesson-controls" class="manual-lesson-controls"></div>
+        </section>
+      </aside>
+    </div>
+    <footer class="page-footer"><span>Пара.План</span><span>Файлы обрабатываются в вашем браузере</span></footer>
+  </main>
+
+  <section id="lesson-preview" class="lesson-preview" aria-labelledby="lesson-preview-title" hidden></section>
+  <dialog id="modal" aria-labelledby="modal-title"><div id="modal-content"></div></dialog>
+</body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "minimum_chrome_version": "106",
+  "name": "Пара.План — экспорт Modeus",
+  "version": "1.6.7",
+  "description": "Собирает расписания Modeus УрФУ в файлы .ics и раскладывает их по разделам меню выбора.",
+  "permissions": ["activeTab", "scripting", "downloads", "storage"],
+  "host_permissions": ["https://urfu.modeus.org/*"],
+  "background": { "service_worker": "worker.js" },
+  "action": { "default_popup": "popup.html" }
+}
